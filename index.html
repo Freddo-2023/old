@@ -1,474 +1,205 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<title>3D Baghdad Presentation</title>
-<style>
-  body {
-    margin: 0;
-    overflow: hidden;
-    font-family: system-ui, sans-serif;
-    background: #111;
-    color: #eee;
-  }
-
-  #sidebar {
-    position: fixed;
-    right: 0;
-    top: 0;
-    width: 260px;
-    height: 100vh;
-    background: #181818;
-    border-left: 1px solid #333;
-    padding: 1rem;
-    box-sizing: border-box;
-    z-index: 10;
-  }
-
-  #sidebar h1 {
-    margin-top: 0;
-    font-size: 1.3rem;
-  }
-
-  #info-title {
-    margin-top: 1rem;
-    font-size: 1.05rem;
-    font-weight: 600;
-  }
-
-  #info-body {
-    margin-top: 0.4rem;
-    font-size: 0.9rem;
-    line-height: 1.4;
-  }
-
-  #hint {
-    margin-top: 1.2rem;
-    font-size: 0.8rem;
-    color: #aaa;
-    border-top: 1px solid #333;
-    padding-top: 0.6rem;
-  }
-
-  #reset-view {
-    margin-top: 0.6rem;
-    padding: 0.3rem 0.6rem;
-    font-size: 0.8rem;
-    background: #222;
-    color: #eee;
-    border: 1px solid #444;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-
-  #reset-view:hover {
-    background: #2a2a2a;
-  }
-
-  canvas {
-    position: absolute;
-    top: 0;
-    left: 0;
-  }
-</style>
+    <meta charset="UTF-8">
+    <title>NYC Architectural Inspector - Endless Edition</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #050508; font-family: 'Segoe UI', sans-serif; }
+        #info-panel { position: absolute; top: 20px; right: 20px; width: 280px; background: rgba(0,0,0,0.85); color: white; padding: 20px; border-radius: 10px; border: 1px solid #444; display: none; backdrop-filter: blur(5px); z-index: 10; }
+        #ui-top { position: absolute; top: 20px; left: 20px; color: white; pointer-events: none; z-index: 10; }
+        .btn { pointer-events: auto; background: #fec309; border: none; padding: 10px; cursor: pointer; font-weight: bold; border-radius: 5px; margin-top: 10px; }
+        h2 { margin-top: 0; color: #fec309; }
+    </style>
 </head>
 <body>
 
-<div id="sidebar">
-  <h1>3D Baghdad</h1>
-  <small>Rotate: left‑drag • Zoom: scroll • Pan: right‑drag / Ctrl+drag</small>
-  <br />
-  <small>You can zoom down to street level and look around.</small>
+    <div id="ui-top">
+        <h1>NYC Inspector v3 (Infinite)</h1>
+        <p>Use Mouse to pan/zoom. New buildings spawn as you move.</p>
+        <button class="btn" onclick="toggleMusic()">🎵 Toggle Jazz Radio</button>
+    </div>
 
-  <button id="reset-view">Reset view</button>
+    <div id="info-panel">
+        <h2 id="b-name">Building Name</h2>
+        <p><strong>Year:</strong> <span id="b-year"></span></p>
+        <p><strong>Type:</strong> <span id="b-type"></span></p>
+        <p id="b-desc"></p>
+        <button class="btn" style="background:#444; color:white" onclick="document.getElementById('info-panel').style.display='none'">Close</button>
+    </div>
 
-  <div id="info-title">Click a building</div>
-  <div id="info-body">
-    This is a 3D, stylised presentation of Baghdad with the House of Wisdom at the center and a river surrounding the city.
-  </div>
+    <audio id="jazzAudio" loop>
+        <source src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-17.mp3" type="audio/mpeg">
+    </audio>
 
-  <div id="hint">
-    This is an artistic representation inspired by historic Baghdad, not a precise reconstruction.
-  </div>
-</div>
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.132.2';
+        import { MapControls } from 'https://cdn.skypack.dev/three@0.132.2/examples/jsm/controls/OrbitControls.js';
 
-<!-- 🎵 Ancient Baghdad‑style Background Music -->
-<audio id="bg-music" loop autoplay>
-  <source src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_7e3f1f0b7e.mp3?filename=middle-east-ambient-110624.mp3" type="audio/mpeg">
-</audio>
+        // --- DATA ---
+        const buildingData = [
+            { name: "Empire Heights", year: "1931", type: "Art Deco Skyscraper", desc: "A limestone masterpiece defining the midtown skyline." },
+            { name: "Greenwich Flats", year: "1895", type: "Residential Brownstone", desc: "Classic walk-up apartments with original brickwork." },
+            { name: "Lexington Plaza", year: "2015", type: "Glass Commercial", desc: "Modern tech hub with floor-to-ceiling reinforced glass." },
+            { name: "The Manhattanite", year: "1950", type: "Mid-Century Apartment", desc: "Post-war housing known for high ceilings and terrace views." }
+        ];
 
-<script>
-  const music = document.getElementById("bg-music");
-  music.volume = 0.35;
+        // --- CONSTANTS ---
+        const CHUNK_SIZE = 200; // Size of one "block" of the city
+        const SPAWN_RADIUS = 2;  // How many chunks around the camera to keep loaded
+        const GRID_SPACING = 25; // Space between buildings
 
-  // Autoplay fallback for browsers that block it
-  music.play().catch(() => {
-    window.addEventListener("click", () => music.play(), { once: true });
-  });
-</script>
+        // --- SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050508, 0.002);
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 2000);
+        camera.position.set(150, 150, 150);
 
-<!-- Three.js and OrbitControls -->
-<script src="https://cdn.jsdelivr.net/npm/three@0.152.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.152.0/examples/js/controls/OrbitControls.js"></script>
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
 
-<script>
-/* ==========================
-   BASIC THREE.JS SETUP
-========================== */
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x050709);
+        // MapControls is better for "scrolling" around a flat plane
+        const controls = new MapControls(camera, renderer.domElement);
+        controls.enableDamping = true;
 
-const width = window.innerWidth - 260;
-const height = window.innerHeight;
+        const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+        sun.position.set(100, 200, 100);
+        scene.add(sun);
+        scene.add(new THREE.AmbientLight(0x404050, 0.7));
 
-const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 3000);
-camera.position.set(220, 180, 220);
+        // --- TEXTURES ---
+        function createCityTexture(isModern) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128; canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = isModern ? '#1a1a1a' : '#4a2525'; 
+            ctx.fillRect(0,0,128,256);
+            for(let y=10; y<250; y+=15) {
+                for(let x=10; x<120; x+=12) {
+                    ctx.fillStyle = Math.random() > 0.4 ? '#fff8cc' : '#111';
+                    ctx.fillRect(x, y, 6, 8);
+                }
+            }
+            return new THREE.CanvasTexture(canvas);
+        }
+        const modernTex = createCityTexture(true);
+        const classicTex = createCityTexture(false);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(width, height);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-document.body.appendChild(renderer.domElement);
+        // --- INFINITE GENERATION LOGIC ---
+        const chunks = new Map(); // Store chunks: "x,z" => THREE.Group
+        const buildingsForRaycast = [];
 
-const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-controls.minDistance = 10;
-controls.maxDistance = 600;
-controls.maxPolarAngle = Math.PI - 0.1;
-controls.target.set(0, 5, 0);
+        // Pseudo-random function to make buildings consistent based on coordinates
+        function seededRandom(x, z) {
+            const seed = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+            return seed - Math.floor(seed);
+        }
 
-/* ==========================
-   LIGHTING
-========================== */
-const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-scene.add(ambient);
+        function createChunk(cx, cz) {
+            const chunkGroup = new THREE.Group();
+            
+            for (let x = 0; x < CHUNK_SIZE; x += GRID_SPACING) {
+                for (let z = 0; z < CHUNK_SIZE; z += GRID_SPACING) {
+                    const worldX = cx * CHUNK_SIZE + x;
+                    const worldZ = cz * CHUNK_SIZE + z;
+                    
+                    const rand = seededRandom(worldX, worldZ);
+                    const isTall = rand > 0.7;
+                    const h = isTall ? 60 + (rand * 80) : 15 + (rand * 20);
+                    
+                    const geo = new THREE.BoxGeometry(15, h, 15);
+                    const mat = new THREE.MeshPhongMaterial({ 
+                        color: isTall ? 0x888899 : 0xaa8888, 
+                        map: isTall ? modernTex : classicTex 
+                    });
 
-const sun = new THREE.DirectionalLight(0xffffff, 1.1);
-sun.position.set(300, 400, 200);
-sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.near = 10;
-sun.shadow.camera.far = 1000;
-sun.shadow.camera.left = -400;
-sun.shadow.camera.right = 400;
-sun.shadow.camera.top = 400;
-sun.shadow.camera.bottom = -400;
-scene.add(sun);
+                    const b = new THREE.Mesh(geo, mat);
+                    b.position.set(worldX, h/2, worldZ);
+                    
+                    // Assign random data from list based on seed
+                    const dataIndex = Math.floor(rand * buildingData.length);
+                    b.userData = buildingData[dataIndex];
+                    
+                    chunkGroup.add(b);
+                    buildingsForRaycast.push(b);
+                }
+            }
+            
+            scene.add(chunkGroup);
+            return chunkGroup;
+        }
 
-/* ==========================
-   GROUND & RIVER
-========================== */
-const groundGeo = new THREE.PlaneGeometry(800, 800);
-const groundMat = new THREE.MeshPhongMaterial({ color: 0x151515 });
-const ground = new THREE.Mesh(groundGeo, groundMat);
-ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
-scene.add(ground);
+        function updateChunks() {
+            const camX = Math.floor(camera.position.x / CHUNK_SIZE);
+            const camZ = Math.floor(camera.position.z / CHUNK_SIZE);
 
-const riverGeo = new THREE.RingGeometry(190, 260, 128);
-const riverMat = new THREE.MeshPhongMaterial({
-  color: 0x1c5275,
-  emissive: 0x071827,
-  transparent: true,
-  opacity: 0.95,
-  shininess: 90
-});
-const river = new THREE.Mesh(riverGeo, riverMat);
-river.rotation.x = -Math.PI / 2;
-river.position.y = 0.1;
-river.receiveShadow = true;
-scene.add(river);
+            // Create new chunks
+            for (let x = camX - SPAWN_RADIUS; x <= camX + SPAWN_RADIUS; x++) {
+                for (let z = camZ - SPAWN_RADIUS; z <= camZ + SPAWN_RADIUS; z++) {
+                    const key = `${x},${z}`;
+                    if (!chunks.has(key)) {
+                        chunks.set(key, createChunk(x, z));
+                    }
+                }
+            }
 
-const cityGeo = new THREE.CylinderGeometry(150, 150, 4, 64);
-const cityMat = new THREE.MeshPhongMaterial({ color: 0x3f4c30 });
-const city = new THREE.Mesh(cityGeo, cityMat);
-city.position.y = 2;
-city.receiveShadow = true;
-scene.add(city);
+            // Optional: Remove far away chunks to save memory
+            for (let [key, group] of chunks) {
+                const [cx, cz] = key.split(',').map(Number);
+                if (Math.abs(cx - camX) > SPAWN_RADIUS + 1 || Math.abs(cz - camZ) > SPAWN_RADIUS + 1) {
+                    scene.remove(group);
+                    // Remove children from raycast list
+                    group.children.forEach(child => {
+                        const idx = buildingsForRaycast.indexOf(child);
+                        if (idx > -1) buildingsForRaycast.splice(idx, 1);
+                    });
+                    chunks.delete(key);
+                }
+            }
+        }
 
-/* ==========================
-   WALLS
-========================== */
-function createWall(radius, height, color) {
-  const geo = new THREE.CylinderGeometry(radius, radius, height, 64, 1, true);
-  const mat = new THREE.MeshPhongMaterial({ color, side: THREE.DoubleSide });
-  const wall = new THREE.Mesh(geo, mat);
-  wall.position.y = height / 2 + 2;
-  wall.castShadow = true;
-  scene.add(wall);
-}
+        // --- INTERACTION ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
 
-createWall(150, 14, 0x9c8b5a);
-createWall(110, 12, 0xb8a676);
+        window.addEventListener('click', (event) => {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-/* ==========================
-   GATES
-========================== */
-function createGate(angleDeg, radius, name, description, clickableArray) {
-  const angle = angleDeg * Math.PI / 180;
-  const x = Math.cos(angle) * radius;
-  const z = Math.sin(angle) * radius;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(buildingsForRaycast);
 
-  const geo = new THREE.BoxGeometry(18, 16, 8);
-  const mat = new THREE.MeshPhongMaterial({ color: 0xd9c78a });
-  const gate = new THREE.Mesh(geo, mat);
-  gate.position.set(x, 16 / 2 + 2, z);
-  gate.lookAt(0, 8, 0);
-  gate.castShadow = true;
-  gate.receiveShadow = true;
-  scene.add(gate);
+            if (intersects.length > 0) {
+                const data = intersects[0].object.userData;
+                document.getElementById('info-panel').style.display = 'block';
+                document.getElementById('b-name').innerText = data.name;
+                document.getElementById('b-year').innerText = data.year;
+                document.getElementById('b-type').innerText = data.type;
+                document.getElementById('b-desc').innerText = data.desc;
+            }
+        });
 
-  gate.userData = { name, description };
-  clickableArray.push(gate);
-}
+        // --- ANIMATION ---
+        function animate() {
+            requestAnimationFrame(animate);
+            updateChunks();
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
 
-const clickable = [];
+        window.toggleMusic = function() {
+            const music = document.getElementById('jazzAudio');
+            if (music.paused) music.play();
+            else music.pause();
+        }
 
-createGate(0, 150, "Khorasan Gate", "Gate facing Khorasan.", clickable);
-createGate(90, 150, "Basra Gate", "Gate facing Basra.", clickable);
-createGate(180, 150, "Kufa Gate", "Gate facing Kufa.", clickable);
-createGate(270, 150, "Sham Gate", "Gate facing al‑Sham.", clickable);
-
-/* ==========================
-   CENTRAL COMPLEX
-========================== */
-function registerClickable(mesh, name, description) {
-  mesh.userData = { name, description };
-  clickable.push(mesh);
-}
-
-/* House of Wisdom */
-(function() {
-  const group = new THREE.Group();
-
-  const base = new THREE.Mesh(
-    new THREE.BoxGeometry(40, 10, 26),
-    new THREE.MeshPhongMaterial({ color: 0xc9a96a })
-  );
-  base.position.y = 5;
-  base.castShadow = true;
-  group.add(base);
-
-  const upper = new THREE.Mesh(
-    new THREE.BoxGeometry(32, 6, 18),
-    new THREE.MeshPhongMaterial({ color: 0xe8d7a1 })
-  );
-  upper.position.y = 11;
-  upper.castShadow = true;
-  group.add(upper);
-
-  const dome = new THREE.Mesh(
-    new THREE.SphereGeometry(9, 32, 24),
-    new THREE.MeshPhongMaterial({ color: 0xd5c087 })
-  );
-  dome.position.y = 18;
-  dome.castShadow = true;
-  group.add(dome);
-
-  group.position.set(0, 2, 0);
-  scene.add(group);
-
-  registerClickable(
-    group,
-    "House of Wisdom (Bayt al‑Hikma)",
-    "Baghdad’s great center of learning and translation."
-  );
-})();
-
-/* Palace */
-(function() {
-  const group = new THREE.Group();
-
-  const base = new THREE.Mesh(
-    new THREE.CylinderGeometry(26, 26, 12, 32),
-    new THREE.MeshPhongMaterial({ color: 0xb48a54 })
-  );
-  base.position.y = 8;
-  base.castShadow = true;
-  group.add(base);
-
-  const dome = new THREE.Mesh(
-    new THREE.SphereGeometry(13, 32, 24),
-    new THREE.MeshPhongMaterial({ color: 0xe4d2a0 })
-  );
-  dome.position.y = 18;
-  dome.castShadow = true;
-  group.add(dome);
-
-  group.position.set(-50, 2, 0);
-  scene.add(group);
-
-  registerClickable(
-    group,
-    "Golden Gate Palace",
-    "The palace of the Abbasid caliph."
-  );
-})();
-
-/* Great Mosque */
-(function() {
-  const group = new THREE.Group();
-
-  const hall = new THREE.Mesh(
-    new THREE.BoxGeometry(45, 10, 30),
-    new THREE.MeshPhongMaterial({ color: 0xb77f4a })
-  );
-  hall.position.y = 7;
-  hall.castShadow = true;
-  group.add(hall);
-
-  const minaret = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.5, 2.5, 22, 16),
-    new THREE.MeshPhongMaterial({ color: 0xd3b78a })
-  );
-  minaret.position.set(20, 18, -10);
-  minaret.castShadow = true;
-  group.add(minaret);
-
-  const top = new THREE.Mesh(
-    new THREE.SphereGeometry(3, 16, 12),
-    new THREE.MeshPhongMaterial({ color: 0xf1e3c1 })
-  );
-  top.position.y = 12;
-  minaret.add(top);
-
-  group.position.set(50, 2, -25);
-  scene.add(group);
-
-  registerClickable(
-    group,
-    "Great Mosque",
-    "A major congregational mosque of Baghdad."
-  );
-})();
-
-/* ==========================
-   CLAY HOUSES
-========================== */
-function createClayHouse(x, z) {
-  const w = 6 + Math.random() * 4;
-  const d = 6 + Math.random() * 4;
-  const h = 5 + Math.random() * 3;
-
-  const house = new THREE.Mesh(
-    new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshPhongMaterial({ color: 0x8f5e33 })
-  );
-  house.position.set(x, h / 2 + 2, z);
-  house.castShadow = true;
-  house.receiveShadow = true;
-  scene.add(house);
-}
-
-for (let i = 0; i < 120; i++) {
-  const angle = Math.random() * Math.PI * 2;
-  const r = 80 + Math.random() * 50;
-  createClayHouse(Math.cos(angle) * r, Math.sin(angle) * r);
-}
-
-/* ==========================
-   PEOPLE WALKING
-========================== */
-const people = [];
-
-function createPerson(radius, speed, phase) {
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.7, 0.7, 3, 8),
-    new THREE.MeshPhongMaterial({ color: 0xddc9a5 })
-  );
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.9, 12, 10),
-    new THREE.MeshPhongMaterial({ color: 0xf1dec0 })
-  );
-  head.position.y = 2.2;
-  body.add(head);
-
-  body.position.y = 3.5;
-  body.castShadow = true;
-  scene.add(body);
-
-  people.push({ mesh: body, radius, speed, phase });
-}
-
-for (let i = 0; i < 25; i++) {
-  createPerson(
-    40 + Math.random() * 80,
-    0.3 + Math.random() * 0.5,
-    Math.random() * Math.PI * 2
-  );
-}
-
-/* ==========================
-   CLICK HANDLING
-========================== */
-const raycaster = new THREE.Raycaster();
-const mouse = new THREE.Vector2();
-const infoTitle = document.getElementById("info-title");
-const infoBody = document.getElementById("info-body");
-
-window.addEventListener("click", (event) => {
-  if (event.clientX > window.innerWidth - 260) return;
-
-  mouse.x = (event.clientX / (window.innerWidth - 260)) * 2 - 1;
-  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-
-  raycaster.setFromCamera(mouse, camera);
-  const hits = raycaster.intersectObjects(clickable, true);
-
-  if (hits.length > 0) {
-    let obj = hits[0].object;
-    while (obj.parent && !obj.userData.name && obj.parent !== scene) {
-      obj = obj.parent;
-    }
-    if (obj.userData && obj.userData.name) {
-      infoTitle.textContent = obj.userData.name;
-      infoBody.textContent = obj.userData.description;
-    }
-  }
-});
-
-/* ==========================
-   RESET VIEW BUTTON
-========================== */
-document.getElementById("reset-view").addEventListener("click", () => {
-  camera.position.set(220, 180, 220);
-  controls.target.set(0, 5, 0);
-  controls.update();
-});
-
-/* ==========================
-   RESIZE HANDLER
-========================== */
-window.addEventListener("resize", () => {
-  const w = window.innerWidth - 260;
-  const h = window.innerHeight;
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
-  renderer.setSize(w, h);
-});
-
-/* ==========================
-   ANIMATION LOOP
-========================== */
-const clock = new THREE.Clock();
-
-function animate() {
-  const t = clock.getElapsedTime();
-
-  people.forEach(p => {
-    const angle = p.phase + t * p.speed * 0.4;
-    p.mesh.position.x = Math.cos(angle) * p.radius;
-    p.mesh.position.z = Math.sin(angle) * p.radius;
-    p.mesh.rotation.y = -angle + Math.PI / 2;
-  });
-
-  controls.update();
-  renderer.render(scene, camera);
-  requestAnimationFrame(animate);
-}
-animate();
-</script>
-
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
 </body>
 </html>
